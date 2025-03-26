@@ -43,11 +43,9 @@ class DeepGlobeDataset(Dataset):
 
     def rgb_to_class_index(self, mask):
         mask_np = np.array(mask)
-        height, width, _ = mask_np.shape
+        _, height, width = mask_np.shape
         class_mask = np.zeros((height, width), dtype=np.int64)
-        
         for class_idx, color in enumerate(self.class_dict.values()):
-            class_mask[(mask_np == color).all(axis=2)] = class_idx
-        
+            color_np = np.array(color)[:, None, None]
+            class_mask[(mask_np == color_np).all(axis=0)] = class_idx
         return torch.from_numpy(class_mask)
-
