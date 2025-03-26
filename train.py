@@ -2,11 +2,12 @@ import torch
 import torch.optim as optim
 from torch.optim.swa_utils import AveragedModel, SWALR
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from model import UNet
 from lovasz_loss import lovasz_softmax
 from dataset import DeepGlobeDataset
 import os
+from data_transforms import get_transforms
+from config import root_dir, metadata_file, saved_model_path
 
 BATCH_SIZE = 8
 NUM_EPOCHS = 150
@@ -50,7 +51,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(save_dir, 'best_model.pth'))
+            torch.save(model.state_dict(), saved_model_path)
             print(f"Saved best model with validation loss: {best_val_loss:.4f}")
         
         if epoch > swa_start:
@@ -61,30 +62,12 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
     return swa_model, best_val_loss
 
-def get_transforms(phase: str):
-    if phase == "train":
-        return transforms.Compose([
-            transforms.Resize((288, 288)),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(15),
-            transforms.ToTensor(),
-        ])
-    else:
-        return transforms.Compose([
-            transforms.Resize((288, 288)),
-            transforms.ToTensor(),
-        ])
 
 if __name__ == "__main__":
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet(n_classes=7).to(device)
     criterion = lovasz_softmax
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-    # Data loading
-    root_dir = "/dataset"
-    metadata_file = "/dataset/metadata.csv"
 
     train_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("train"))
     val_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("val"))
