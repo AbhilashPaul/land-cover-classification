@@ -8,16 +8,6 @@ class DecoderBlock(nn.Module):
 
     def __init__(self, conv_in_channels, conv_out_channels, up_in_channels=None, up_out_channels=None):
         super().__init__()
-        """
-        eg:
-        decoder1:
-        up_in_channels      : 1024,     up_out_channels     : 512
-        conv_in_channels    : 1024,     conv_out_channels   : 512
-
-        decoder5:
-        up_in_channels      : 64,       up_out_channels     : 64
-        conv_in_channels    : 128,      conv_out_channels   : 64
-        """
         if up_in_channels==None:
             up_in_channels=conv_in_channels
         if up_out_channels==None:
@@ -40,7 +30,7 @@ class DecoderBlock(nn.Module):
         return self.conv(x)
 
 class UNet(nn.Module):
-    def __init__(self, n_classes=2):
+    def __init__(self, n_classes=7):
         super().__init__()
         resnet34 = torchvision.models.resnet34(weights='IMAGENET1K_V1')
         filters = [64, 128, 256, 512]
@@ -74,6 +64,8 @@ class UNet(nn.Module):
         )
     
     def forward(self, x):
+        # Pad the input to 2464x2464
+        x = F.pad(x, (8, 8, 8, 8), mode='reflect')
         e1 = self.firstlayer(x)
         maxe1 = self.maxpool(e1)
         e2 = self.encoder1(maxe1)
@@ -90,5 +82,7 @@ class UNet(nn.Module):
         d5 = self.decoder5(d4, e1)
 
         out = self.lastlayer(d5)
-
+        # Crop the output back to 2448x2448
+        out = out[:, :, 8:-8, 8:-8]
         return out
+        
