@@ -5,7 +5,7 @@ from dataset import DeepGlobeDataset
 from torch.utils.data import DataLoader
 from model import UNet
 from data_transforms import get_transforms
-from config import root_dir, metadata_file, saved_model_path 
+from config import root_dir, metadata_file, saved_model_path, BATCH_SIZE, NUM_CLASSES
 
 def evaluate_model(model, test_loader, device, num_classes=7):
     model.eval()
@@ -41,7 +41,9 @@ def evaluate_model(model, test_loader, device, num_classes=7):
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     test_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("test"))
-    test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
-    model = UNet(n_classes=7).to(device)
+    # Print stats for test dataset
+    test_dataset.print_stats()
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    model = UNet(n_classes=NUM_CLASSES).to(device)
     model.load_state_dict(torch.load(saved_model_path))
     mean_iou, class_ious = evaluate_model(model, test_loader, device)

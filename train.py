@@ -7,10 +7,8 @@ from lovasz_loss import lovasz_softmax
 from dataset import DeepGlobeDataset
 import os
 from data_transforms import get_transforms
-from config import root_dir, metadata_file, saved_model_path
+from config import root_dir, metadata_file, saved_model_path, BATCH_SIZE, NUM_EPOCHS, NUM_CLASSES
 
-BATCH_SIZE = 8
-NUM_EPOCHS = 150
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, save_dir):
     swa_model = AveragedModel(model)
@@ -65,19 +63,26 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet(n_classes=7).to(device)
+    print(f"Device: {device}")
+    model = UNet(n_classes=NUM_CLASSES).to(device)
     criterion = lovasz_softmax
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    print("Loading images..")
     train_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("train"))
     val_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("val"))
+    
+    # Print stats for train and validation datasets
+    train_dataset.print_stats()
+    val_dataset.print_stats()
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
+
+    print("Starting model training..")
     trained_model, best_val_loss = train_model(model, train_loader, val_loader, 
                                                criterion, optimizer, num_epochs=NUM_EPOCHS, 
                                                device=device, save_dir="/output")
-
     print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
     print("Model saved at /output/best_model.pth")
