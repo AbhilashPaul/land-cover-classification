@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import pandas as pd
 import numpy as np
+from collections import Counter
 
 class DeepGlobeDataset(Dataset):
     def __init__(self, metadata_file, root_dir, transform=None):
@@ -49,3 +50,32 @@ class DeepGlobeDataset(Dataset):
             color_np = np.array(color)[:, None, None]
             class_mask[(mask_np == color_np).all(axis=0)] = class_idx
         return torch.from_numpy(class_mask)
+
+    def print_stats(self):
+        print(f"\nDataset Statistics:")
+        print(f"Number of images: {len(self)}")
+        
+        # Count class distribution
+        all_labels = []
+        for idx in range(len(self)):
+            _, mask = self[idx]
+            all_labels.extend(mask.numpy().flatten())
+        
+        class_distribution = Counter(all_labels)
+        total_pixels = sum(class_distribution.values())
+        
+        print("\nClass Distribution:")
+        for class_name, (r, g, b) in self.class_dict.items():
+            class_id = list(self.class_dict.values()).index((r, g, b))
+            count = class_distribution[class_id]
+            percentage = (count / total_pixels) * 100
+            print(f"{class_name}: {count} pixels ({percentage:.2f}%)")
+
+        # Calculate mean and std of image intensities
+        all_images = np.stack([self[idx][0].numpy() for idx in range(len(self))])
+        mean = np.mean(all_images, axis=(0, 2, 3))
+        std = np.std(all_images, axis=(0, 2, 3))
+        
+        print(f"\nImage Statistics:")
+        print(f"Mean pixel intensity: {mean}")
+        print(f"Std pixel intensity: {std}")
