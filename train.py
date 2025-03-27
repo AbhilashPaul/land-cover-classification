@@ -4,6 +4,7 @@ from torch.optim.swa_utils import AveragedModel, SWALR
 from torch.utils.data import DataLoader
 from model import UNet
 from lovasz_loss import lovasz_softmax
+from dice_loss import DiceLoss
 from dataset import DeepGlobeDataset
 import os
 from data_transforms import get_transforms
@@ -65,16 +66,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     model = UNet(n_classes=NUM_CLASSES).to(device)
-    criterion = lovasz_softmax
+    criterion = DiceLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     print("Loading images..")
     train_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("train"))
     val_dataset = DeepGlobeDataset(metadata_file, root_dir, transform=get_transforms("val"))
-    
-    # Print stats for train and validation datasets
-    train_dataset.print_stats()
-    val_dataset.print_stats()
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
