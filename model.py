@@ -1,88 +1,85 @@
 import torch
-import torchvision
 import torch.nn as nn
-import torch.nn.functional as F
+import torchvision.models as models
 
-class DecoderBlock(nn.Module):
-    """Upscaling then double conv"""
+class UNet(nn.Module):
+    def __init__(self, n_classes):
+        super(UNet, self).__init__()
+        # Encoder (ResNet34)
+        self.encoder = models.resnet34(weights='IMAGENET1K_V1')
+        self.encoder_layers = nn.ModuleList([
+            nn.Sequential(
+                self.encoder.conv1,
+                self.encoder.bn1,
+                self.encoder.relu,
+                self.encoder.maxpool
+            ), # Output: [B, 64, 64, 64]
+            self.encoder.layer1, # Output: [B, 64, 64, 64]
+            self.encoder.layer2, # Output: [B, 128, 32, 32]
+            self.encoder.layer3, # Output: [B, 256, 16, 16]
+            self.encoder.layer4  # Output: [B, 512, 8, 8]
+        ])
 
-    def __init__(self, conv_in_channels, conv_out_channels, up_in_channels=None, up_out_channels=None):
-        super().__init__()
-        if up_in_channels==None:
-            up_in_channels=conv_in_channels
-        if up_out_channels==None:
-            up_out_channels=conv_out_channels
+        # Decoder blocks
+        self.decoder_blocks = nn.ModuleList([
+            self._make_decoder_block(512, 256), # Output: [B, 256, 16, 16]
+            self._make_decoder_block(512, 128), # Output: [B, 128, 32, 32]
+            self._make_decoder_block(256, 64),  # Output: [B, 64, 64, 64]
+            self._make_decoder_block(128, 32)   # Output: [B, 32, 128, 128]
+        ])
+        
+        # Final upsampling to reach 256x256
+        self.final_upsample = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
+        
+        # Final output
+        self.final = nn.Conv2d(32, n_classes, kernel_size=1) # Output: [B, n_classes, 256, 256]
 
-        self.up = nn.ConvTranspose2d(up_in_channels, up_out_channels, kernel_size=2, stride=2)
-        self.conv = nn.Sequential(
-            nn.Conv2d(conv_in_channels, conv_out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(conv_out_channels),
+    def _make_decoder_block(self, in_channels, out_channels):
+        return nn.Sequential(
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(conv_out_channels, conv_out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(conv_out_channels),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
-    # x1-upconv , x2-downconv
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        x = torch.cat([x1, x2], dim=1)
-        return self.conv(x)
-
-class UNet(nn.Module):
-    def __init__(self, n_classes=7):
-        super().__init__()
-        resnet34 = torchvision.models.resnet34(weights='IMAGENET1K_V1')
-        filters = [64, 128, 256, 512]
-
-        self.firstlayer = nn.Sequential(*list(resnet34.children())[:3])
-        self.maxpool = list(resnet34.children())[3]
-        self.encoder1 = resnet34.layer1
-        self.encoder2 = resnet34.layer2
-        self.encoder3 = resnet34.layer3
-        self.encoder4 = resnet34.layer4
-
-        self.bridge = nn.Sequential(
-            nn.Conv2d(filters[3], filters[3]*2, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(filters[3]*2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2)
+    def forward(self, x): # Input: [B, 3, 256, 256]
+        # Encoder
+        encoder_features = []
+        for layer in self.encoder_layers:
+            x = layer(x)
+            encoder_features.append(x)
+        
+        # Decoder with skip connections
+        # First decoder block - no skip connection for the bottleneck
+        x = self.decoder_blocks[0](x)
+        
+        # Remaining decoder blocks with skip connections
+        for i in range(1, len(self.decoder_blocks)):
+            # Concatenate with corresponding encoder feature
+            skip_feature = encoder_features[-(i+1)]
             
-        )
-
-        self.decoder1 = DecoderBlock(conv_in_channels=filters[3]*2, conv_out_channels=filters[3])
-        self.decoder2 = DecoderBlock(conv_in_channels=filters[3], conv_out_channels=filters[2])
-        self.decoder3 = DecoderBlock(conv_in_channels=filters[2], conv_out_channels=filters[1])
-        self.decoder4 = DecoderBlock(conv_in_channels=filters[1], conv_out_channels=filters[0])
-        self.decoder5 = DecoderBlock(
-            conv_in_channels=filters[1], conv_out_channels=filters[0], up_in_channels=filters[0], up_out_channels=filters[0]
-        )
-
-        self.lastlayer = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=filters[0], out_channels=filters[0], kernel_size=2, stride=2),
-            nn.Conv2d(filters[0], n_classes, kernel_size=3, padding=1, bias=False)
-        )
-    
-    def forward(self, x):
-        # Pad the input to 2464x2464
-        x = F.pad(x, (8, 8, 8, 8), mode='reflect')
-        e1 = self.firstlayer(x)
-        maxe1 = self.maxpool(e1)
-        e2 = self.encoder1(maxe1)
-        e3 = self.encoder2(e2)
-        e4 = self.encoder3(e3)
-        e5 = self.encoder4(e4)
+            # Check if dimensions match for concatenation
+            if x.shape[2:] != skip_feature.shape[2:]:
+                # Resize skip feature to match decoder output if needed
+                skip_feature = nn.functional.interpolate(
+                    skip_feature, 
+                    size=x.shape[2:],
+                    mode='bilinear', 
+                    align_corners=False
+                )
+            
+            # Concatenate along channel dimension
+            x = torch.cat([x, skip_feature], dim=1)
+            
+            # Apply decoder block
+            x = self.decoder_blocks[i](x)
         
-        c = self.bridge(e5)
+        # Final upsampling to reach 256x256
+        x = self.final_upsample(x)
         
-        d1 = self.decoder1(c, e5)
-        d2 = self.decoder2(d1, e4)
-        d3 = self.decoder3(d2, e3)
-        d4 = self.decoder4(d3, e2)
-        d5 = self.decoder5(d4, e1)
-
-        out = self.lastlayer(d5)
-        # Crop the output back to 2448x2448
-        out = out[:, :, 8:-8, 8:-8]
-        return out
+        # Final convolution
+        x = self.final(x)
         
+        return x
